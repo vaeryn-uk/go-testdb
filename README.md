@@ -1,5 +1,7 @@
 # testdb
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/vaeryn-uk/go-testdb.svg)](https://pkg.go.dev/github.com/vaeryn-uk/go-testdb)
+
 Facilitates testing for applications that use a database in Golang. This module takes the approach
 of using a real database, rather than mocking them out.
 
