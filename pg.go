@@ -11,10 +11,13 @@ import (
 	"testing"
 )
 
-// NewPg initialises a new Postgres test database at the database indicated by dsn.
-// dsn must be a valid connection that has permission to create new databases.
-// Returns the Db handle representing a fully migrated, isolated database ready
-// for use in your test.
+// NewPg initialises a new Postgres test database at the database indicated by
+// dsn. dsn must be a valid connection that has permission to create new
+// databases. Returns the Db handle representing a fully migrated, isolated
+// database ready for use in your test.
+//
+// provide a nil migrator to disable any migrations and return a blank database
+// instead.
 func NewPg(t testing.TB, dsn string, migrator Migrator) Db {
 	return New[*pgx.Conn](t, dsn, &pgInitializer{}, migrator)
 }
@@ -75,6 +78,29 @@ func (p *PgDb) QueryValue(t testing.TB, sql string, into any, args ...any) {
 	} else {
 		must(t, err)
 	}
+}
+
+func (p *PgDb) QueryRow(t testing.TB, sql string, args ...any) func(into ...any) {
+	conn := p.connect(t, p.dsn)
+	defer conn.Close(context.Background())
+
+	row := conn.QueryRow(context.Background(), sql, args...)
+
+	return func(into ...any) {
+		err := row.Scan(into...)
+		if errors.Is(err, pgx.ErrNoRows) {
+			must(t, err, "test database query for a single row returned 0 rows")
+		} else {
+			must(t, err)
+		}
+	}
+}
+
+func (p *PgDb) Exec(t testing.TB, sql string, args ...any) ExecResult {
+	c, err := p.connect(t, p.dsn).Exec(context.Background(), sql, args...)
+	must(t, err)
+
+	return ExecResult{RowsAffected: c.RowsAffected()}
 }
 
 func (p *PgDb) Drop(t testing.TB) {

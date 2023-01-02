@@ -7,6 +7,10 @@ import (
 	"testing"
 )
 
+type ExecResult struct {
+	RowsAffected int64
+}
+
 // Db is the core handle provided to your tests. This represents a fully migrated,
 // test database ready for use. This database is always brand new, so has isolation from
 // other tests. Use New or its variants to get one of these.
@@ -23,6 +27,13 @@ type Db interface {
 	// QueryValue will runs sql with args, writing a single value back to into. Provide
 	// a pointer for into.
 	QueryValue(t testing.TB, sql string, into any, args ...any)
+	// QueryRow will scan the results of the first row of a query in to the pointer values
+	// provided in the returned func. This will fatal the test if there is error scanning
+	// in to the provided values, or if there are 0 rows.
+	QueryRow(t testing.TB, sql string, args ...any) func(into ...any)
+	// Exec applies arbitrary SQL commands on this test database. If the command produces
+	// an error, the test will error.
+	Exec(t testing.TB, sql string, args ...any) ExecResult
 	// Drop forcefully removes the database. This is automatically done as part of database
 	// cleanup.
 	Drop(t testing.TB)
@@ -89,39 +100,48 @@ var ErrorHandler = func(t testing.TB, err error, extra ...any) {
 // New initialises a new test database at the database indicated by dsn.
 // dsn must be a valid connection that has permission to create new databases.
 // Returns the Db handle representing a fully migrated, isolated database ready
-// for use in your test.
+// for use in your test. If the provided m is nil, no migrations will be applied.
+// Instead, a blank database will be created.
 //
 // You may want to use a ready-provided constructor, such as NewPg. This is exposed
 // for custom initializers if you're using a database that isn't supported.
 func New[Conn any](t testing.TB, dsn string, h Initializer[Conn], m Migrator) Db {
 	root := h.Connect(t, dsn)
 
-	migrationHash := m.Hash(t)
-	templateName := fmt.Sprintf("test_template_%s", migrationHash)
-
-	h.Lock(t, root, templateName)
-
-	if !h.Exists(t, root, templateName) {
-		h.Create(t, root, templateName)
-
-		done := false
-		// Due to our halting error handling, here we add an explicit check
-		// to see if the migration has applied. If not, remove the template
-		// DB as it'll be corrupt/bad.
-		t.Cleanup(func() {
-			if !done {
-				h.Remove(t, root, templateName)
-			}
-		})
-
-		m.Migrate(t, h.NewDsn(t, dsn, templateName))
-		done = true
-	}
-
 	testDbName := fmt.Sprintf("test_db_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
-	h.CreateFromTemplate(t, root, templateName, testDbName)
 
-	h.Unlock(t, root, templateName)
+	if m != nil {
+		// Migrator provided; apply them.
+
+		migrationHash := m.Hash(t)
+		templateName := fmt.Sprintf("test_template_%s", migrationHash)
+
+		h.Lock(t, root, templateName)
+
+		if !h.Exists(t, root, templateName) {
+			h.Create(t, root, templateName)
+
+			done := false
+			// Due to our halting error handling, here we add an explicit check
+			// to see if the migration has applied. If not, remove the template
+			// DB as it'll be corrupt/bad.
+			t.Cleanup(func() {
+				if !done {
+					h.Remove(t, root, templateName)
+				}
+			})
+
+			m.Migrate(t, h.NewDsn(t, dsn, templateName))
+			done = true
+		}
+
+		h.CreateFromTemplate(t, root, templateName, testDbName)
+
+		h.Unlock(t, root, templateName)
+	} else {
+		// No migrations. A new blank DB will do.
+		h.Create(t, root, testDbName)
+	}
 
 	testDbDsn := h.NewDsn(t, dsn, testDbName)
 
