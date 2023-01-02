@@ -64,8 +64,17 @@ func (p *PgDb) Insert(t testing.TB, table string, data ...map[string]any) {
 }
 
 func (p *PgDb) QueryValue(t testing.TB, sql string, into any, args ...any) {
-	// TODO implement me
-	panic("implement me")
+	conn := p.connect(t, p.dsn)
+	defer conn.Close(context.Background())
+
+	row := conn.QueryRow(context.Background(), sql, args...)
+
+	err := row.Scan(into)
+	if errors.Is(err, pgx.ErrNoRows) {
+		must(t, err, "test database query for a single value returned 0 rows")
+	} else {
+		must(t, err)
+	}
 }
 
 func (p *PgDb) Drop(t testing.TB) {
