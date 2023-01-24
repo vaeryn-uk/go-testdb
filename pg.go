@@ -26,6 +26,7 @@ type PgDb struct {
 	name    string
 	dsn     string
 	rootDsn string
+	conns   map[string]*pgx.Conn
 }
 
 func (p *PgDb) Name() string {
@@ -40,7 +41,6 @@ func (p *PgDb) Insert(t testing.TB, table string, data ...map[string]any) {
 	t.Helper()
 
 	conn := p.connect(t, p.dsn)
-	defer conn.Close(context.Background())
 
 	for _, entry := range data {
 		args := make([]any, 0, len(entry))
@@ -68,7 +68,6 @@ func (p *PgDb) Insert(t testing.TB, table string, data ...map[string]any) {
 
 func (p *PgDb) QueryValue(t testing.TB, sql string, into any, args ...any) {
 	conn := p.connect(t, p.dsn)
-	defer conn.Close(context.Background())
 
 	row := conn.QueryRow(context.Background(), sql, args...)
 
@@ -82,7 +81,6 @@ func (p *PgDb) QueryValue(t testing.TB, sql string, into any, args ...any) {
 
 func (p *PgDb) QueryRow(t testing.TB, sql string, args ...any) func(into ...any) {
 	conn := p.connect(t, p.dsn)
-	defer conn.Close(context.Background())
 
 	row := conn.QueryRow(context.Background(), sql, args...)
 
@@ -104,7 +102,13 @@ func (p *PgDb) Exec(t testing.TB, sql string, args ...any) ExecResult {
 }
 
 func (p *PgDb) Drop(t testing.TB) {
+	// Close our open connections.
+	for _, conn := range p.conns {
+		_ = conn.Close(context.Background())
+	}
+
 	root := p.connect(t, p.rootDsn)
+	defer root.Close(context.Background())
 
 	// Forcibly close any remaining connections
 	closeConns := `
@@ -117,11 +121,24 @@ WHERE pg_stat_activity.datname = '%s'`
 
 	_, err = root.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS \"%s\"", verifyPgDbName(t, p.name)))
 	must(t, err)
+
+	p.conns = nil
 }
 
 func (p *PgDb) connect(t testing.TB, dsn string) *pgx.Conn {
+	if p.conns == nil {
+		p.conns = make(map[string]*pgx.Conn)
+	}
+
+	existing, exists := p.conns[dsn]
+
+	if exists {
+		return existing
+	}
+
 	conn, err := pgx.Connect(context.Background(), dsn)
 	must(t, err)
+	p.conns[dsn] = conn
 	return conn
 }
 
