@@ -18,8 +18,8 @@ import (
 //
 // provide a nil migrator to disable any migrations and return a blank database
 // instead.
-func NewPg(t testing.TB, dsn string, migrator Migrator) Db {
-	return New[*pgx.Conn](t, dsn, &pgInitializer{}, migrator)
+func NewPg(t testing.TB, dsn string, migrator Migrator, opts Options) Db {
+	return New[*pgx.Conn](t, dsn, &pgInitializer{}, migrator, opts)
 }
 
 type PgDb struct {
@@ -158,6 +158,10 @@ func (p *pgInitializer) Lock(t testing.TB, conn *pgx.Conn, name string) {
 func (p *pgInitializer) Unlock(t testing.TB, conn *pgx.Conn, name string) {
 	_, err := conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", crc32.ChecksumIEEE([]byte(name)))
 	must(t, err)
+}
+
+func (p *pgInitializer) Close(conn *pgx.Conn) {
+	_ = conn.Close(context.Background())
 }
 
 func (p *pgInitializer) Exists(t testing.TB, conn *pgx.Conn, name string) bool {
