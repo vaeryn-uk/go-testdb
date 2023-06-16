@@ -110,19 +110,42 @@ func (p *PgDb) Drop(t testing.TB) {
 	root := p.connect(t, p.rootDsn)
 	defer root.Close(context.Background())
 
+	// Retry dropping the database for some time to give other connections to drop.
+	attempts := 0
+	for {
+		err := p.dropDatabase(t, root)
+		if err == nil {
+			break
+		}
+
+		if attempts < 3 {
+			attempts++
+			continue
+		} else {
+			ErrorHandler(t, err)
+		}
+	}
+
+	p.conns = nil
+}
+
+func (p *PgDb) dropDatabase(t testing.TB, root *pgx.Conn) error {
 	// Forcibly close any remaining connections
 	closeConns := `
 SELECT pg_terminate_backend(pg_stat_activity.pid)
 FROM pg_stat_activity
-WHERE pg_stat_activity.datname = '%s'`
+WHERE pg_stat_activity.datname = '%s'
+AND pid <> pg_backend_pid()`
 
-	_, err := root.Exec(context.Background(), fmt.Sprintf(closeConns, verifyPgDbName(t, p.name)))
-	must(t, err)
+	ctx := context.Background()
 
-	_, err = root.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS \"%s\"", verifyPgDbName(t, p.name)))
-	must(t, err)
+	_, err := root.Exec(ctx, fmt.Sprintf(closeConns, verifyPgDbName(t, p.name)))
+	if err != nil {
+		return err
+	}
 
-	p.conns = nil
+	_, err = root.Exec(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS \"%s\"", verifyPgDbName(t, p.name)))
+	return err
 }
 
 func (p *PgDb) connect(t testing.TB, dsn string) *pgx.Conn {
