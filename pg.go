@@ -30,7 +30,7 @@ type PgDb struct {
 }
 
 func (p *PgDb) Name() string {
-	return p.dsn
+	return p.name
 }
 
 func (p *PgDb) Dsn() string {
@@ -192,17 +192,17 @@ func (p *pgInitializer) CreateFromTemplate(t testing.TB, conn *pgx.Conn, templat
 	must(t, err)
 }
 
+var nameRegex = regexp.MustCompile("/(\\w+)\\?")
+
 func (p *pgInitializer) NewDsn(t testing.TB, base string, newName string) string {
 	// Ideally would use pgx.ConnConfig parsing, but doesn't seem to allow
 	// us to tweak it and then return a new ConnString(). So hacking with
 	// regex for now.
-	r := regexp.MustCompile("/\\w+\\?")
-
-	if !r.MatchString(base) {
+	if !nameRegex.MatchString(base) {
 		ErrorHandler(t, fmt.Errorf("invalid DSN provided, cannot find database name in `%s`", base))
 	}
 
-	return r.ReplaceAllString(base, fmt.Sprintf("/%s?", newName))
+	return nameRegex.ReplaceAllString(base, fmt.Sprintf("/%s?", newName))
 }
 
 func (p *pgInitializer) Remove(t testing.TB, conn *pgx.Conn, name string) {
